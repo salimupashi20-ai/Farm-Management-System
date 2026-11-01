@@ -1,0 +1,26 @@
+# Free testing only: Render free PostgreSQL expires after 30 days.
+services:
+  - type: web
+    name: farm-manager
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: farm-manager-db
+          property: connectionString
+      - key: SETUP_KEY
+        generateValue: true
+databases:
+  - name: farm-manager-db
+    plan: free
+    region: frankfurt
+    ipAllowList: []

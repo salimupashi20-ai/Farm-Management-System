@@ -1,13 +1,9 @@
-const KEY='farm-manager-v1';
-const fresh=()=>({stock:[],sales:[],health:[],expenses:[],workers:[]});
-let db;try{db=JSON.parse(localStorage.getItem(KEY))||fresh()}catch{db=fresh();alert('Saved records could not be read. Restore a backup before adding new records.')}
+let db=FarmDomain.fresh();
 let page='Overview',action='';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),money=n=>new Intl.NumberFormat('en-ZM',{style:'currency',currency:'ZMW',maximumFractionDigits:2}).format(n),today=()=>new Date().toLocaleDateString('en-CA'),sum=(a,f)=>a.reduce((s,r)=>s+Number(r[f]||0),0);
 const pages=['Overview','Sales','Stock','Animal health','Expenses','Workers'],icons=['◫','↗','▦','♡','↙','♧'];
 $('nav').innerHTML=pages.map((p,i)=>`<a href="#${p}"><span>${icons[i]}</span>${p}</a>`).join('');
 $('#date').textContent=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-function status(){$('#status').textContent=navigator.onLine?'● Online · device storage':'● Offline · device storage'}status();addEventListener('online',status);addEventListener('offline',status);
-function persist(next){try{localStorage.setItem(KEY,JSON.stringify(next));db=next;render();return true}catch{$('#error').textContent='Unable to save. Device storage may be full. Export a backup.';return false}}
 function toast(t){$('#toast').textContent=t;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',3200)}
 function empty(title,body){return `<div class="empty"><strong>${title}</strong>${body}</div>`}
 function table(headers,rows){return rows.length?`<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`:empty('No records yet','Use the button above to add your first record.')}
@@ -36,15 +32,43 @@ if(a==='payment'||a==='expayment'){title='Add payment';f=amount('paid','Payment 
 if(a==='task'){title='Update task';f=input('task','Task','text',db.workers.find(w=>w.id===id).task||'')}
 $('#formTitle').textContent=title;$('#fields').innerHTML=f;$('dialog').showModal()}
 $('#add').onclick=()=>open({Overview:'sale',Sales:'sale',Stock:'stock','Animal health':'health',Expenses:'expense',Workers:'worker'}[page]);$('#close').onclick=()=>$('dialog').close();
-$('#content').onclick=e=>{let b=e.target.closest('button');if(!b)return;let d=b.dataset;if(d.action)open(d.action);if(d.pay)open('payment',d.pay);if(d.expay)open('expayment',d.expay);if(d.wage)open('wage',d.wage);if(d.task)open('task',d.task);if(d.attend){let n=structuredClone(db),w=n.workers.find(w=>w.id===d.attend);w.attendance=w.attendance||[];if(w.attendance.includes(today()))return toast('Already marked present today.');w.attendance.push(today());if(persist(n))toast('Attendance saved.')}if(d.done){let n=structuredClone(db);n.health.find(h=>h.id===d.done).done=true;persist(n)}};
-$('#form').onsubmit=e=>{e.preventDefault();let r=Object.fromEntries(new FormData(e.target)),n=structuredClone(db);for(let k of ['qty','min','price','paid','amount'])if(k in r){r[k]=Number(r[k]);if(!Number.isFinite(r[k])||r[k]<0)return fail('Enter valid positive amounts.')}function fail(s){$('#error').textContent=s}r.id=crypto.randomUUID();
-if(action==='stock'){if(n.stock.some(s=>s.name.toLowerCase()===r.name.trim().toLowerCase()))return fail('This item already exists. Use a stock movement.');r.name=r.name.trim();n.stock.push(r)}
-if(action==='sale'){let s=n.stock.find(s=>s.id===r.stock);if(r.qty<=0||r.qty>s.qty)return fail('Quantity must be greater than zero and within available stock.');r.total=Math.round(r.qty*r.price*100)/100;if(r.paid>r.total)return fail('Payment cannot exceed the sale value.');s.qty=Math.round((s.qty-r.qty)*100)/100;r.product=s.name;n.sales.push(r)}
-if(action==='movement'){let s=n.stock.find(s=>s.id===r.stock);if(r.qty<=0)return fail('Quantity must be greater than zero.');if(r.direction!=='Received'&&r.qty>s.qty)return fail('Not enough stock for this movement.');s.qty=Math.round((s.qty+(r.direction==='Received'?r.qty:-r.qty))*100)/100;n.movements=n.movements||[];n.movements.push({...r,date:today()})}
-if(action==='expense'||action==='wage'){if(r.amount<=0||r.paid>r.amount)return fail('Enter an amount above zero; payment cannot exceed it.');if(action==='wage'){r.worker=target;r.category='Wages'}n.expenses.push(r)}
-if(action==='health')n.health.push(r);if(action==='worker')n.workers.push({...r,attendance:[]});if(action==='task')n.workers.find(w=>w.id===target).task=r.task;
-if(action==='payment'||action==='expayment'){let x=(action==='payment'?n.sales:n.expenses).find(s=>s.id===target),total=action==='payment'?x.total:x.amount;if(r.paid<=0||r.paid>Math.round((total-x.paid)*100)/100)return fail('Payment must be greater than zero and within the balance.');x.paid=Math.round((x.paid+r.paid)*100)/100;x.payments=x.payments||[];x.payments.push({date:today(),amount:r.paid})}
-if(persist(n)){$('dialog').close();toast('Record saved on this device.')}};
-$('#export').onclick=()=>{let blob=new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),data:db},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='farm-manager-backup-'+today()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
-$('#import').onchange=async e=>{let file=e.target.files[0];if(!file)return;try{let b=JSON.parse(await file.text());if(b.version!==1||!b.data||!['stock','sales','health','expenses','workers'].every(k=>Array.isArray(b.data[k])))throw Error();for(let [key,fields]of Object.entries({stock:['qty','min'],sales:['qty','total','paid'],expenses:['amount','paid']}))for(let r of b.data[key])for(let f of fields)if(typeof r[f]!=='number'||!Number.isFinite(r[f])||r[f]<0)throw Error();if(confirm('Replace all records on this device with this backup? Export your current records first if needed.')){if(persist(b.data))toast('Backup restored.')}}catch{alert('This file is not a valid Farm Manager backup.')}e.target.value=''};
-addEventListener('hashchange',render);render();if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+$('#content').onclick=async e=>{let b=e.target.closest('button');if(!b)return;let d=b.dataset;if(d.action)open(d.action);if(d.pay)open('payment',d.pay);if(d.expay)open('expayment',d.expay);if(d.wage)open('wage',d.wage);if(d.task)open('task',d.task);try{if(d.attend)await submitOperation('attend',{date:today()},d.attend);if(d.done)await submitOperation('done',{},d.done)}catch(e){toast(e.message)}};
+async function submitOperation(type,data,target=''){
+ const op={id:crypto.randomUUID(),type,data,target};
+ if(type==='task')op.previous=db.workers.find(w=>w.id===target)?.task||'';
+ await FarmSync.enqueue(op);toast('Saved on this device. Sync will confirm it.');
+}
+$('#form').onsubmit=async e=>{e.preventDefault();const r=Object.fromEntries(new FormData(e.target));for(const k of ['qty','min','price','paid','amount'])if(k in r)r[k]=Number(r[k]);if(!r.date)r.date=today();const button=e.target.querySelector('.wide');button.disabled=true;try{await submitOperation(action,r,target);$('dialog').close()}catch(e){$('#error').textContent=e.message}finally{button.disabled=false}};
+$('#export').onclick=async()=>{const data=await FarmSync.backup(),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='farm-manager-backup-'+today()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+addEventListener('hashchange',()=>{if(FarmSync.view().user)render()});
+let offlineAllowed=false,gateMode='login';
+function showGate(mode='login',message=''){
+ gateMode=mode;$('#workspace').hidden=true;$('#account-gate').hidden=false;
+ const signup=mode!=='login';
+ $('#account-gate').innerHTML=`<div class="account-card"><a class="brand" href="#">❧ Farm Manager</a><p class="eyebrow">YOUR FAMILY FARM</p><h1>${mode==='setup'?'Set up your farm':mode==='join'?'Join your family':'Welcome back'}</h1><p>Sign in with your farm account.</p><form id="auth-form">${signup?input('name','Your name'):''}${input('email','Email address','email')}${input('password','Password','password','','minlength="12" maxlength="128" autocomplete="'+(signup?'new-password':'current-password')+'"')}${signup?input('code',mode==='setup'?'Setup key from Render':'Invitation code'):''}<p class="error" id="auth-error" role="alert">${esc(message)}</p><button class="wide">${signup?'Create account':'Sign in'}</button></form><div class="quick"><button id="show-login">Sign in</button><button id="show-join">Use invitation</button><button id="show-setup">First-time setup</button></div>${FarmSync.view().user?'<button class="text" id="offline-open">Continue on this device without syncing</button><p class="helper">Only use offline access on a trusted personal device. Your saved records are accessible to anyone using this browser.</p>':''}</div>`;
+ $('#show-login').onclick=()=>showGate('login');$('#show-join').onclick=()=>showGate('join');$('#show-setup').onclick=()=>showGate('setup');
+ if($('#offline-open'))$('#offline-open').onclick=()=>{offlineAllowed=true;refresh()};
+ $('#auth-form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{await FarmSync.authenticate(gateMode,Object.fromEntries(new FormData(e.target)));offlineAllowed=false;refresh();await FarmSync.sync()}catch(err){$('#auth-error').textContent=err.message}finally{button.disabled=false}};
+}
+function refresh(){
+ const v=FarmSync.view();if(!v.user||v.authNeeded&&!offlineAllowed){if($('#account-gate').hidden)showGate('login');return}
+ $('#account-gate').hidden=true;$('#workspace').hidden=false;$('#restore-label').hidden=v.user.role!=='owner';db=v.data;render();
+ $('#status').textContent=v.working?'◌ Syncing…':v.authNeeded?'● Sign in to sync':v.pending.length?'● '+v.pending.length+' pending':v.online?'● Synced':'● Offline';
+ $('#saved').textContent=v.user.name+' · '+v.pending.length+' pending';
+ $('#sync-notice').textContent=v.error|| (v.pending.length?'Entries are saved on this device and waiting for server confirmation.':'Shared family records. Offline entries sync when this app is open and connected.');
+ const conflict=v.conflict||(v.pending.length&&v.online&&v.error?{id:v.pending[0].id,type:v.pending[0].type,message:v.error}:null);
+ $('#queue-review').innerHTML=conflict?`<div class="notice"><strong>Entry needs review: ${esc(conflict.type)}</strong><p>${esc(conflict.message)}</p><p>Export a backup before removing this pending entry. Later entries will be checked again against the latest shared records.</p><button id="discard-entry">Discard this pending entry</button></div>`:'';
+ if($('#discard-entry'))$('#discard-entry').onclick=async()=>{if(confirm('Remove this unsynced entry from this device? Export a backup first if needed.')){try{await FarmSync.discard(conflict.id)}catch(e){toast(e.message)}}};
+}
+$('#restore').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>2*1024*1024)throw Error('Backup is too large. Contact the administrator.');const data=JSON.parse(await file.text());if(confirm('Import this backup into the shared farm? This only works if the shared farm is empty.')){await FarmSync.restore(data);toast('Backup restored to the shared farm.')}}catch(err){toast(err.message)}e.target.value=''};
+$('#sync-now').onclick=()=>FarmSync.sync();$('#signout').onclick=async()=>{try{await FarmSync.logout();offlineAllowed=false;showGate()}catch(e){toast(e.message)}};
+$('#account').onclick=()=>{
+ const v=FarmSync.view();$('#formTitle').textContent='Your account';$('#fields').innerHTML=`<p>${esc(v.user.name)} · ${esc(v.user.email)}</p>${v.user.role==='owner'?'<button type="button" id="invite-family">Create family invitation</button><p id="invite-result"></p>':''}<h2>Change password</h2>${input('current','Current password','password')}${input('password','New password (12+ characters)','password','','minlength="12" maxlength="128"')}`;
+ $('#error').textContent='';$('dialog').showModal();
+ if($('#invite-family'))$('#invite-family').onclick=async()=>{try{const r=await FarmSync.invitation();$('#invite-result').textContent='Share this single-use code with one family member. It expires in 24 hours: '+r.code}catch(e){$('#error').textContent=e.message}};
+ const old=$('#form').onsubmit;$('#form').onsubmit=async e=>{e.preventDefault();try{await FarmSync.changePassword(Object.fromEntries(new FormData(e.target)));$('dialog').close();toast('Password changed. Other sessions have been signed out.')}catch(e){$('#error').textContent=e.message}};
+ $('dialog').addEventListener('close',()=>{$('#form').onsubmit=old},{once:true});
+};
+addEventListener('farmchange',refresh);
+(async()=>{try{await FarmSync.init();if(FarmSync.view().user){refresh();if(!$('#account-gate').hidden)showGate()}else{let setup=false;try{setup=(await FarmSync.config()).setupRequired}catch{}showGate(setup?'setup':'login')}}catch(e){showGate('login','Device storage is unavailable. Enable browser storage and reload.')}})();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
